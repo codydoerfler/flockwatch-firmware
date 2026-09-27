@@ -35,6 +35,10 @@
   #define USE_M5BASIC 1
 #endif
 
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  #include "flockwatch_ble.h"
+#endif
+
 #if defined(ENABLE_BLE_SCAN) && ENABLE_BLE_SCAN
   #include <NimBLEDevice.h>
   #include <NimBLEScan.h>
@@ -544,6 +548,10 @@ typedef struct {
   char      ssid[33];
   char      frameKind[12];
   uint8_t   confidence;   // 0–100 computed in callback, emitted in JSON
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  uint32_t  detectedAt;
+  bool      ieFingerprint;
+#endif
 } AlertEntry;
 
 static volatile AlertEntry alertQueue[ALERT_QUEUE_SIZE];
@@ -553,7 +561,7 @@ static portMUX_TYPE    queueMux  = portMUX_INITIALIZER_UNLOCKED;
 
 static void IRAM_ATTR enqueueAlert(AlertType type, const uint8_t* mac, int8_t rssi,
                                     uint8_t ch, const char* ssid, const char* kind,
-                                    uint8_t confidence) {
+                                    uint8_t confidence, bool ieFingerprint = false) {
   portENTER_CRITICAL_ISR(&queueMux);
   size_t next = (alertHead + 1) % ALERT_QUEUE_SIZE;
   // Ring buffer full: this return used to be completely silent, which made a
@@ -573,6 +581,10 @@ static void IRAM_ATTR enqueueAlert(AlertType type, const uint8_t* mac, int8_t rs
   e->rssi       = rssi;
   e->channel    = ch;
   e->confidence = confidence;
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  e->detectedAt = millis();
+  e->ieFingerprint = ieFingerprint;
+#endif
   memcpy((void*)e->mac, mac, 6);
 
   if (ssid) { strncpy((char*)e->ssid,      ssid, 32); ((char*)e->ssid)[32] = '\0'; }
@@ -763,7 +775,13 @@ static void fyProcessBLEAdvertisedDevice(NimBLEAdvertisedDevice* adv) {
   //    vs an anonymous MAC).
   std::string devName = adv->getName();
   if (!matched && !devName.empty()) {
-    if (fyCheckFlockBleName(devName.c_str())) {
+    bool nameMatched = fyCheckFlockBleName(devName.c_str());
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+    // The reserved companion name contains "Flock". Exclude only this name
+    // match; manufacturer/service signatures above still take precedence.
+    nameMatched = nameMatched && !fwIsCompanionName(devName);
+#endif
+    if (nameMatched) {
       matched       = true;
       bleAlertType  = ALERT_BLE_NAME;
       bleConfidence = CS_BLE_NAME_STANDALONE;
@@ -879,7 +897,9 @@ static void bleScanStop() {
 }
 
 static void initBLE() {
+#if !defined(ENABLE_FLOCKWATCH_BLE) || !ENABLE_FLOCKWATCH_BLE
   NimBLEDevice::init("");
+#endif
   // NimBLE 1.x's NimBLEDevice::setPower() ONLY has the
   // esp_power_level_t-enum overload (setPower(esp_power_level_t, ...)) — it
   // does NOT accept a plain int/dBm value.  NimBLE 2.x dropped that enum
@@ -895,7 +915,13 @@ static void initBLE() {
 #if FY_NIMBLE_V2
   g_pBLEScan->setScanCallbacks(&g_bleCallbacks, false);
 #else
+  #if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  // Let the app deduplicate; don't suppress repeated advertisements upstream.
+  g_pBLEScan->setAdvertisedDeviceCallbacks(&g_bleCallbacks, true);
+  g_pBLEScan->setMaxResults(0);
+  #else
   g_pBLEScan->setAdvertisedDeviceCallbacks(&g_bleCallbacks, false);
+  #endif
 #endif
   g_pBLEScan->setActiveScan(false);
   g_pBLEScan->setInterval(100);
@@ -1964,7 +1990,8 @@ static void IRAM_ATTR wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
             //     OUI is Flock-exclusive. The fingerprint was drive-tested on
             //     Flock's own LiteOn-built radio, so an mfr-tier match is
             //     expected to be common and is not evidence on its own.
-            if (fyCheckFlockIeSignature(body, bodyLen)) {
+            const bool ieFingerprint = fyCheckFlockIeSignature(body, bodyLen);
+            if (ieFingerprint) {
 #if FY_SNIFF_STATS
               FY_STAT_BUMP(fyStats.candIeSig);
 #endif
@@ -1981,7 +2008,7 @@ static void IRAM_ATTR wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
             FY_STAT_BUMP(fyStats.candWildcard);
 #endif
             enqueueAlert(ALERT_WILDCARD_PROBE, hdr->addr2, rssi, ch,
-                         nullptr, "probe_req", conf);
+                         nullptr, "probe_req", conf, ieFingerprint);
             emitted = true;
           }
         }
@@ -2122,6 +2149,31 @@ static void IRAM_ATTR wifiSniffer(void* buf, wifi_promiscuous_pkt_type_t type) {
 // DRAIN QUEUE
 // ============================================================
 
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+static const char* flockwatchMethod(const AlertEntry& e, const char* mac) {
+  switch (e.type) {
+    case ALERT_OUI_ADDR2:
+    case ALERT_OUI_ADDR1:
+    case ALERT_OUI_ADDR3:
+      return fyCheckFlockHighMAC(mac) ? "wifi_oui_high" : "wifi_oui_mfr";
+    case ALERT_OUI_MFR:
+    case ALERT_SOUNDTHINKING: return "wifi_oui_mfr";
+    case ALERT_SSID:
+    case ALERT_LAA_SSID: return "wifi_ssid_pattern";
+    case ALERT_WILDCARD_PROBE:
+      return e.ieFingerprint ? "wifi_ie_fingerprint" : "wifi_probe_wildcard";
+    case ALERT_FW_DEFAULT_MAC: return "wifi_fwdefault_mac";
+    case ALERT_BLE_MFR_ID:
+    case ALERT_BLE_RAVEN_UUID:
+    case ALERT_BLE_RAVEN_RANGE: return "ble_raven";
+    case ALERT_BLE_FLOCK_GATT: return "ble_flock_gatt";
+    case ALERT_BLE_NAME:
+      return strcasestr(e.ssid, "DfuTarg") ? "ble_dfu_target" : "ble_name_pattern";
+  }
+  return "wifi_oui_mfr";
+}
+#endif
+
 static void drainAlertQueue() {
   while (true) {
     portENTER_CRITICAL(&queueMux);
@@ -2138,6 +2190,15 @@ static void drainAlertQueue() {
     char macStr[18];
     macToStr(e.mac, macStr, sizeof(macStr));
     const char* method = alertTypeToMethod(e.type);
+
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+    char detail[80];
+    // Preserve the upstream subtype in detail when v1 groups multiple methods.
+    snprintf(detail, sizeof(detail), "%s%s%s", method,
+             e.ssid[0] ? ": " : "", e.ssid);
+    flockwatchDetection(e.detectedAt, flockwatchMethod(e, macStr),
+                        e.confidence, e.rssi, macStr, detail);
+#endif
 
     bool chirpWorthy = false;
     // NOTE on the text field passed to fyAddDetection: BLE alerts deliberately
@@ -2529,6 +2590,10 @@ void setup() {
   esp_wifi_set_promiscuous(true);
   dualPrintln("[flockyou] wifi promiscuous ON");
 
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  flockwatchBegin();
+#endif
+
 #if defined(ENABLE_BLE_SCAN) && ENABLE_BLE_SCAN
   dualPrintln("[flockyou] BLE init...");
   initBLE();
@@ -2545,6 +2610,16 @@ void setup() {
   // time-sharing automatically; no application-level pause/resume needed.
   bleCoexStart();
   dualPrintln("[flockyou] BLE coex scan started");
+#endif
+
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  flockwatchTick(false,
+#if defined(ENABLE_BLE_SCAN) && ENABLE_BLE_SCAN
+                 g_pBLEScan && g_pBLEScan->isScanning(),
+#else
+                 false,
+#endif
+                 fyStats.framesTotal);
 #endif
 
   dualPrintln("[flockyou] v2 WiFi detector started");
@@ -2607,6 +2682,16 @@ void loop() {
 #endif
 #endif
 
+
+#if defined(ENABLE_FLOCKWATCH_BLE) && ENABLE_FLOCKWATCH_BLE
+  flockwatchTick(sniffingStopped,
+#if defined(ENABLE_BLE_SCAN) && ENABLE_BLE_SCAN
+                 g_pBLEScan && g_pBLEScan->isScanning(),
+#else
+                 false,
+#endif
+                 fyStats.framesTotal);
+#endif
 
 #if defined(USE_M5BASIC) || defined(USE_M5STICKC_PLUS_SE)
   // Button presses are now detected on the UI task (ui_task.h) — it is the
