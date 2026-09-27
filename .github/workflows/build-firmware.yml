@@ -262,8 +262,10 @@ jobs:
           echo "Manifests generated:"
           ls -la site/manifest-*.json
 
-      - name: Copy flasher page
-        run: cp docs/index.html site/index.html
+      - name: Copy flasher pages
+        run: |
+          cp docs/index.html site/index.html
+          cp docs/flash.html site/flash.html
 
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
