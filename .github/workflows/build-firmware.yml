@@ -60,6 +60,8 @@ jobs:
           -e esp32dev
           -e m5atom-lite-ble
           -e m5atom-lite
+          -e m5atom-lite-flockwatch
+          -e m5atom-lite-flockwatch-ble
           -e m5atom-lite-ble-selftest
           -e m5atom-echo-ble
           -e m5atom-echo
@@ -82,7 +84,7 @@ jobs:
           ls -la .pio/build/ 2>/dev/null || echo "WARNING: .pio/build missing or empty"
 
           # Required envs - failure here blocks deploy
-          for env in esp32dev-ble esp32dev m5atom-lite-ble m5atom-lite m5atom-lite-ble-selftest m5atom-echo-ble m5atom-echo m5atom-voice-ble m5atom-voice m5atom-voices3r-ble m5atom-voices3r m5stack-basic-ble m5stack-basic m5stack-core2-aws-ble m5stack-core2-aws m5stickc-plus-se-ble m5stickc-plus-se m5atom-lite-beacon; do
+          for env in esp32dev-ble esp32dev m5atom-lite-ble m5atom-lite m5atom-lite-flockwatch m5atom-lite-flockwatch-ble m5atom-lite-ble-selftest m5atom-echo-ble m5atom-echo m5atom-voice-ble m5atom-voice m5atom-voices3r-ble m5atom-voices3r m5stack-basic-ble m5stack-basic m5stack-core2-aws-ble m5stack-core2-aws m5stickc-plus-se-ble m5stickc-plus-se m5atom-lite-beacon; do
             if [ -f ".pio/build/$env/firmware.bin" ]; then
               echo "OK $env: $(du -sh .pio/build/$env/firmware.bin | cut -f1)"
             else
@@ -115,7 +117,7 @@ jobs:
           echo "Found boot_app0.bin at: $BOOT_APP0"
 
           # Classic-ESP32-offset environments (bootloader @ 0x1000)
-          for env in esp32dev-ble esp32dev m5atom-lite-ble m5atom-lite m5atom-lite-ble-selftest m5atom-echo-ble m5atom-echo m5atom-voice-ble m5atom-voice m5stack-basic-ble m5stack-basic m5stack-core2-aws-ble m5stack-core2-aws m5stickc-plus-se-ble m5stickc-plus-se m5atom-lite-beacon; do
+          for env in esp32dev-ble esp32dev m5atom-lite-ble m5atom-lite m5atom-lite-flockwatch m5atom-lite-flockwatch-ble m5atom-lite-ble-selftest m5atom-echo-ble m5atom-echo m5atom-voice-ble m5atom-voice m5stack-basic-ble m5stack-basic m5stack-core2-aws-ble m5stack-core2-aws m5stickc-plus-se-ble m5stickc-plus-se m5atom-lite-beacon; do
             mkdir -p site/firmware/$env
             cp .pio/build/$env/firmware.bin   site/firmware/$env/
             cp .pio/build/$env/bootloader.bin site/firmware/$env/
@@ -224,6 +226,8 @@ jobs:
           gen_esp32_manifest "esp32dev-ble"          "Flock You - Generic ESP32 DevKit (BLE)"
           gen_esp32_manifest "esp32dev"               "Flock You - Generic ESP32 DevKit (No BLE)"
           gen_esp32_manifest "m5atom-lite-ble"       "Flock You - M5Atom Lite (BLE)"
+          gen_esp32_manifest "m5atom-lite-flockwatch" "FlockWatch - M5Atom Lite (Companion)"
+          gen_esp32_manifest "m5atom-lite-flockwatch-ble" "FlockWatch - M5Atom Lite (Companion + BLE Scan)"
           gen_esp32_manifest "m5atom-lite"            "Flock You - M5Atom Lite (No BLE)"
           gen_esp32_manifest "m5atom-lite-ble-selftest" "Flock You - M5Atom Lite (BLE Self-Test)"
           gen_esp32_manifest "m5atom-echo-ble"       "Flock You - M5Atom Echo (BLE)"

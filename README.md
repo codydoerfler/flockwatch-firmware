@@ -125,6 +125,54 @@ pio run -e esp32dev-ble -t upload && pio device monitor
 | `lilygo-t-dongle-c5` | LILYGO T-Dongle C5 | — |
 | `lilygo-t-dongle-c5-ble` | LILYGO T-Dongle C5 | ✅ NimBLE 2.x |
 
+### FlockWatch companion iOS app (new)
+
+These additive M5Atom Lite builds implement [BLE_CONTRACT.md](BLE_CONTRACT.md),
+the authoritative v1 GATT UUID and JSON specification shared with the iOS app.
+
+| Environment | Based on | Adds |
+|-------------|----------|------|
+| `m5atom-lite-flockwatch` | `m5atom-lite` | WiFi detection + BLE GATT peripheral; no BLE central scanning. Recommended simplest companion setup. |
+| `m5atom-lite-flockwatch-ble` | `m5atom-lite-ble` | WiFi detection + GATT peripheral + existing passive Raven/Flock BLE scanning, sharing one NimBLE host and ESP-IDF software coexistence. |
+
+The device advertises as **FlockWatch-XXXX**, using the last four uppercase hex
+digits of its own BLE MAC. The complete name is in the primary advertisement;
+the service UUID is in the scan response. Connect from the companion app and
+subscribe to Detection Event (`6E400003-…`) and Device Status (`6E400004-…`).
+One companion can connect at a time; advertising resumes after disconnect.
+No PIN or OS-level bonding is required by this v1 profile.
+
+Each queued WiFi/BLE hit is sent before the existing serial/audio cooldown,
+without peripheral deduplication. Scores are unchanged. IE-fingerprinted probes
+use `wifi_ie_fingerprint`; other wildcard probes use `wifi_probe_wildcard`.
+The v1 method vocabulary groups BLE manufacturer/Raven-range hits under
+`ble_raven`, and manufacturer/SoundThinking OUI hits under `wifi_oui_mfr`;
+`detail` retains the upstream subtype. `DfuTarg` name hits use `ble_dfu_target`.
+The combined build excludes the reserved `FlockWatch-XXXX` name from its own
+name matcher so nearby companion detectors do not trigger each other.
+
+Status is readable with current uptime/counters, notifies every 30 seconds and
+on state changes, and always has `battery_pct: null`. `packets_per_sec` measures
+WiFi frames reaching the matcher over the latest sampling interval;
+`detections_since_boot` counts queued hits, including while disconnected.
+The peripheral requests ATT MTU 517. Every notification contains one complete
+UTF-8 JSON object; optional detail is emptied if necessary to fit the negotiated
+MTU. If mandatory fields cannot fit (e.g. default MTU 23 before negotiation),
+notifications are skipped until a sufficient MTU is available; status remains
+readable. There is no offline replay. Normal serial/dashboard, LED/buzzer and
+SPIFFS output continue without an app connected. Existing build environments,
+flash layout and web-flasher defaults are unchanged. The web flasher offers both
+new builds under the ATOM Lite variants after CI publishes them.
+
+```bash
+./flash.sh --once   # choose 10: WiFi + companion, or 11: also scan BLE
+./flash.sh          # same choices, loops for additional devices
+
+# Compile only (no hardware or upload)
+pio run -e m5atom-lite-flockwatch
+pio run -e m5atom-lite-flockwatch-ble
+```
+
 ### 3. Test Detection
 - Device boots with Super Mario 1-2 startup tune
 - LED flashes on WiFi traffic
