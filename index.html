@@ -410,6 +410,16 @@ const BOARDS = {
     extra:[
       noBleVariant('manifest-m5atom-lite.json', 'ESP32'),
       {
+        id:'flockwatch', manifest:'manifest-m5atom-lite-flockwatch.json',
+        label:'FlockWatch companion', chip:'ESP32',
+        desc:'WiFi detection with BLE notifications for the FlockWatch iOS app. No BLE scanning.'
+      },
+      {
+        id:'flockwatch-ble', manifest:'manifest-m5atom-lite-flockwatch-ble.json',
+        label:'FlockWatch companion + BLE scan', chip:'ESP32',
+        desc:'WiFi and Raven/Flock BLE detection with notifications for the FlockWatch iOS app.'
+      },
+      {
         id:'selftest', manifest:'manifest-m5atom-lite-ble-selftest.json',
         label:'🧪 BLE Self-Test', chip:'ESP32 · Test Tool',
         desc:'Single-board BLE pipeline self-test — periodically self-advertises the 3 Flock BLE signatures and picks them back up via its own scan. NEVER use as a real detector.'
